@@ -121,8 +121,9 @@ def project_roots(home):
   result.extend(p for p in home.iterdir() if p.is_dir() and not p.is_symlink() and any((p/m).is_file() for m in MANIFESTS))
  except OSError:pass
  return list(dict.fromkeys(result))
-def developer_discovery(home,size):
+def developer_discovery(home,size,entry_limit=20000):
  import subprocess
+ from collections import deque
  rows=[];coverage=[];running=[]
  # Only a process whose working directory is inside a project blocks it.
  for proc in pathlib.Path('/proc').iterdir():
@@ -135,10 +136,11 @@ def developer_discovery(home,size):
  for base in project_roots(home):
   if not base.is_dir() or base.is_symlink():continue
   print('Inspecting projects in '+str(base),file=sys.stderr,flush=True)
-  stack=[(base,0)];count=0;errors=[];limited=False
+  stack=deque([(base,0)]);count=0;errors=[];limited=False
   while stack:
-   project,depth=stack.pop()
-   try:children=list(project.iterdir())
+   project,depth=stack.popleft()
+   try:
+    with os.scandir(project) as listing:children=sorted((pathlib.Path(e.path) for e in listing if e.is_dir(follow_symlinks=False)),key=lambda p:(not any((p/m).is_file() for m in MANIFESTS),p.name))
    except OSError as e:errors.append(str(e));continue
    manifests={m for m in MANIFESTS if (project/m).is_file()}
    specs={}
@@ -175,7 +177,7 @@ def developer_discovery(home,size):
     rows.append(dict(id=hashlib.sha256(str(p).encode()).hexdigest()[:16],label=str(project.relative_to(base) or project.name)+' · '+name,paths=[p],bytes=amount,blocked=blocked,reason=reason,confidence='preserve' if tracked or git_failed else 'review',default=False,selected=False,kind='development',source=str(base),windows=[]))
    for child in children:
     count+=1
-    if count>20000:limited=True;break
+    if count>entry_limit:limited=True;break
     name=child.name
     if depth<5 and child.is_dir() and not child.is_symlink() and name not in candidates and name not in SKIP and name not in {'dist','build','target','.venv','venv','.next','.nuxt','.svelte-kit','.angular','.parcel-cache','.turbo','coverage','out','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache'} and not re.search(r'(^|[-_.])(backups?|snapshots?|bak)([-_.]|$)',name):stack.append((child,depth+1))
    if limited:break

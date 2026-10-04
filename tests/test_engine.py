@@ -130,4 +130,20 @@ class Safety(unittest.TestCase):
    m.USER_HOME=self.home;m.CACHE=self.home/'.cache';m.processes=lambda:set();m.run=lambda args,**kwargs:type('Result',(),{'stdout':'','returncode':0})()
    rows=m.legacy_categories();self.assertEqual(len(rows),1);self.assertFalse(rows[0]['selected']);self.assertTrue(source.exists())
   finally:m.USER_HOME,m.CACHE,m.run,m.processes=old
+ def test_manifest_project_scanned_before_large_unrelated_tree(self):
+  for i in range(50):self.put('Projects/aaa-unrelated/tree/sub'+str(i)+'/file')
+  self.put('Projects/rpd-example/package.json');self.put('Projects/rpd-example/pnpm-lock.yaml');self.put('Projects/rpd-example/node_modules/pkg/data')
+  rows,coverage=m.discovery.developer_discovery(self.home,m.size,entry_limit=20)
+  self.assertTrue(any(r['paths']==[self.home/'Projects/rpd-example/node_modules'] for r in rows));self.assertTrue(coverage[0]['limited'])
+ def test_multiple_close_requests_deduplicate_windows(self):
+  old=(m.categories,m.run);calls=[]
+  try:
+   window={'address':'0xabc','title':'Example','app':'Example'}
+   m.categories=lambda:[{'id':key,'windows':[window]} for key in ('a','b')]
+   m.run=lambda args:calls.append(args) or type('Result',(),{'returncode':0,'stdout':'','stderr':''})()
+   self.assertEqual(len(m.close_apps('a,b')['close_requested']),1);self.assertEqual(len(calls),1)
+   calls.clear()
+   with self.assertRaises(ValueError):m.close_apps('a,missing')
+   self.assertEqual(calls,[])
+  finally:m.categories,m.run=old
 if __name__=='__main__':unittest.main()

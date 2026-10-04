@@ -25,7 +25,7 @@ A custom System menu can read `~/.config/omarchy/extensions/system-menu.json`. T
 - Discovers cache and diagnostic entries in XDG directories, Firefox profile locations, Flatpak data, npm/Cargo caches, Java/IcedTea/Gradle caches and recognized development projects.
 - Automatically selects verified regenerable caches. Unknown caches, diagnostics, offline website data, dependencies and build output require manual review.
 - Protects cookies, credentials, sessions, personal application data, tracked project files, installed runtimes, Trash and performance caches.
-- Offers normal window closure and rescan for identifiable active applications. It never force-kills applications or automatically closes unsaved work.
+- Use the lock icon to queue normal application closure; confirm in the footer, then rescan. Unsaved work may prompt. No files are deleted by closing applications.
 - Requires confirmation and a successful preview. The full selection is checked for changed files before deletion. Cache directories retain their identity and permissions; eligible contents are removed.
 - Provides real logs, scan reports, disk usage, scan cancellation, and separate system cleanup for package versions, archived journal logs and aged temporary files.
 

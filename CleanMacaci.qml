@@ -28,7 +28,8 @@ Item {
   property int excludedCount: 0
   property bool toolsOpen: false
   property string toolGroup: "main"
-  property bool closeConfirming: false
+  property var restoreSelectionIDs: []
+  readonly property var closeRows: visibleRows.filter(function(r){return r.closeSelected && r.blocked && r.windows && r.windows.length>0})
   readonly property var visibleRows: categories.filter(function(r){return r.confidence!=="preserve"})
   readonly property bool allSelected: visibleRows.some(function(r){return !r.blocked}) && visibleRows.filter(function(r){return !r.blocked}).every(function(r){return r.selected})
   function selectVisible() {
@@ -45,7 +46,7 @@ Item {
     var available = rows.filter(function(r) { return r.bytes > 0 })
     excludedCount = available.filter(function(r) { return r.blocked }).length
     detailIndex = -1
-    categories = available
+    categories = available.map(function(r){return restoreSelectionIDs.indexOf(r.id)>=0 && !r.blocked ? Object.assign({},r,{selected:true}) : r})
   }
   readonly property var detailRow: detailIndex >= 0 && detailIndex < categories.length ? categories[detailIndex] : null
   readonly property bool busy: worker.running
@@ -90,9 +91,18 @@ Item {
     categories=categories.map(function(r){return Object.assign({},r,{selected:!r.blocked && select})})
     confirming=false
   }
+  function toggleLock(row) {
+    if(busy || !row.blocked || !row.windows || !row.windows.length)return
+    categories=categories.map(function(r){return r.id===row.id ? Object.assign({},r,{closeSelected:!r.closeSelected}) : r})
+    detailIndex=rowIndex(row); confirming=false
+  }
   function cleanSelected() {
     if (busy) return
     if (!confirming) { confirming = true; sounds.play("warning"); return }
+    if(closeRows.length) {
+      restoreSelectionIDs=categories.filter(function(r){return r.selected || r.closeSelected}).map(function(r){return r.id})
+      start(["--close-apps",closeRows.map(function(r){return r.id}).join(",")]);return
+    }
     var ids = categories.filter(function(row) { return row.selected && !row.blocked }).map(function(row) { return row.id })
     start(["--clean", ids.join(",")])
   }
@@ -111,7 +121,7 @@ Item {
         try {
           if (root.cancelling || !text.trim()) return
           var data = JSON.parse(text)
-          if(data.close_requested){root.resultText=data.note;root.closeConfirming=false;rescanTimer.restart();return}
+          if(data.close_requested){root.resultText=data.note;root.confirming=false;rescanTimer.restart();return}
           if (data.error) { root.errorText = data.error; sounds.play("error"); return }
           if (data.scan) {
             root.resultText = "Cache removed: " + root.formatSize(data.removed_bytes) + ". " + data.errors.length + " error."
@@ -159,7 +169,7 @@ Item {
           SoundUi.Button { soundBus:sounds; iconText:"󰅖"; tooltipText:"Close"; enabled:!root.busy; opacity:enabled?1:0.45; onClicked:root.close() }
         }
         Text { text:"Verified regenerable caches are selected automatically. Project dependencies and uncertain data require review."; color:Color.menu.text; font.family:Style.font.menuFamily; font.pixelSize:Style.font.heading; Layout.fillWidth:true; wrapMode:Text.WordWrap }
-        Text { text:root.busy ? (root.cancelling ? "Cancelling scan…" : root.operation === "close" ? "Requesting application close…" : root.operation === "clean" ? "Cleaning selected files…" : "Scanning application data…") : "Selected: "+root.formatSize(root.selectedBytes); color:Color.menu.text; font.family:Style.font.menuFamily; font.pixelSize:Style.font.heading }
+        Text { text:root.busy ? (root.cancelling ? "Cancelling scan…" : root.operation === "close" ? "Requesting application close…" : root.operation === "clean" ? "Cleaning selected files…" : "Scanning application data…") : "Selected: "+root.formatSize(root.selectedBytes)+(root.closeRows.length?" · "+root.closeRows.length+" close requests":""); color:Color.menu.text; font.family:Style.font.menuFamily; font.pixelSize:Style.font.heading }
         Rectangle { Layout.fillWidth:true; implicitHeight:1; color:Color.menu.border }
         RowLayout {
           Layout.fillWidth:true; spacing:8
@@ -178,19 +188,22 @@ Item {
               required property var modelData
               required property int index
               width:list.cellWidth-8; height:58; radius:6
-              activeFocusOnTab:!root.busy && !modelData.blocked
-              Keys.onSpacePressed:{root.toggleCategory(root.rowIndex(modelData));sounds.interaction("click")}
+              activeFocusOnTab:!root.busy && (!modelData.blocked || (!!modelData.windows && modelData.windows.length>0))
+              Keys.onSpacePressed:{if(modelData.blocked)root.toggleLock(modelData);else root.toggleCategory(root.rowIndex(modelData));sounds.interaction("click")}
               opacity:root.busy?0.45:1
               color:hover.containsMouse || activeFocus ? Color.menu.border : "transparent"
-              MouseArea { id:hover; anchors.fill:parent; hoverEnabled:true; enabled:!root.busy; onEntered:{root.detailIndex=root.rowIndex(modelData);root.closeConfirming=false} onClicked:{root.detailIndex=root.rowIndex(modelData);if(!modelData.blocked){root.toggleCategory(root.detailIndex);sounds.interaction("click")}} }
+              MouseArea { id:hover; anchors.fill:parent; hoverEnabled:true; enabled:!root.busy; onEntered:{root.detailIndex=root.rowIndex(modelData)} onClicked:{root.detailIndex=root.rowIndex(modelData);if(!modelData.blocked){root.toggleCategory(root.detailIndex);sounds.interaction("click")}} }
               Item {
                 anchors { fill:parent; leftMargin:12; rightMargin:12 }
-                Text { id:check; anchors.verticalCenter:parent.verticalCenter; width:24; horizontalAlignment:Text.AlignHCenter; text:modelData.blocked?"󰌾":modelData.selected?"󰄲":"󰄱"; color:Color.menu.text; opacity:modelData.blocked?0.45:1; font.family:Style.font.family; font.pixelSize:24 }
+                Item { id:check; anchors.verticalCenter:parent.verticalCenter; width:24; height:32
+                  Text { anchors.centerIn:parent; text:modelData.blocked?(modelData.closeSelected?"󰌿":"󰌾"):modelData.selected?"󰄲":"󰄱"; color:Color.menu.text; opacity:modelData.blocked && !modelData.closeSelected?0.45:1; font.family:Style.font.family; font.pixelSize:24 }
+                  MouseArea { anchors.fill:parent; enabled:!root.busy && (!modelData.blocked || (!!modelData.windows && modelData.windows.length>0)); cursorShape:Qt.PointingHandCursor; onClicked:{if(modelData.blocked)root.toggleLock(modelData);else root.toggleCategory(root.rowIndex(modelData))} }
+                }
                 Column {
                   anchors { left:check.right; leftMargin:10; right:amount.left; rightMargin:8; verticalCenter:parent.verticalCenter }
                   spacing:3
                   Text { width:parent.width; text:modelData.label; elide:Text.ElideRight; color:Color.menu.text; opacity:modelData.blocked?0.6:1; font.family:Style.font.menuFamily; font.pixelSize:Style.font.heading }
-                  Text { text:modelData.blocked?(modelData.confidence==="preserve"?"PROTECTED":"CLOSE APP FIRST"):modelData.default?"SAFE · AUTO": "REVIEW"; color:Color.menu.text; opacity:0.65; font.family:Style.font.menuFamily; font.pixelSize:Style.font.bodySmall }
+                  Text { text:modelData.blocked?(modelData.closeSelected?"WILL CLOSE":modelData.confidence==="preserve"?"PROTECTED":"CLOSE APP FIRST"):modelData.default?"SAFE · AUTO": "REVIEW"; color:Color.menu.text; opacity:0.65; font.family:Style.font.menuFamily; font.pixelSize:Style.font.bodySmall }
                 }
                 Text { id:amount; anchors { right:parent.right; verticalCenter:parent.verticalCenter } text:root.formatSize(modelData.bytes); color:Color.menu.text; font.family:Style.font.menuFamily; font.pixelSize:Style.font.body }
               }
@@ -199,13 +212,6 @@ Item {
           }
         }
         Rectangle { Layout.fillWidth:true; implicitHeight:1; color:Color.menu.border }
-        RowLayout {
-          visible:!!root.detailRow && root.detailRow.blocked && root.detailRow.confidence !== "preserve" && !!root.detailRow.windows && root.detailRow.windows.length>0
-          Layout.fillWidth:true
-          Text { text:root.closeConfirming ? "Close these application windows? Unsaved work may prompt." : "This application is using the cache."; color:Color.menu.text; font.family:Style.font.menuFamily; font.pixelSize:Style.font.heading; Layout.fillWidth:true; wrapMode:Text.WordWrap }
-          SoundUi.Button { soundBus:sounds; text:root.closeConfirming?"Confirm Close":"Close App & Rescan"; iconText:"󰅖"; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading; bordered:true; enabled:!root.busy; opacity:enabled?1:0.45; onClicked:{if(!root.closeConfirming)root.closeConfirming=true;else root.start(["--close-apps",root.detailRow.id])} }
-          SoundUi.Button { soundBus:sounds; iconText:"󰁍"; tooltipText:"Cancel close"; visible:root.closeConfirming; enabled:!root.busy; onClicked:root.closeConfirming=false }
-        }
         RowLayout {
           Layout.fillWidth:true
           Flickable {
@@ -224,7 +230,7 @@ Item {
         RowLayout {
           id:footerActions
           Layout.fillWidth:true; spacing:12
-          SoundUi.Button { soundBus:sounds; Layout.fillWidth:true; Layout.preferredWidth:1; text:root.confirming?"Confirm Clean":"Clean Selected"; iconText:"󰃢"; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy && root.selectedBytes>0; opacity:enabled?1:0.45; onClicked:root.cleanSelected() }
+          SoundUi.Button { soundBus:sounds; Layout.fillWidth:true; Layout.preferredWidth:1; text:root.closeRows.length?(root.confirming?"Confirm Close Apps":"Close Apps & Rescan"):(root.confirming?"Confirm Clean":"Clean Selected"); iconText:"󰃢"; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy && (root.selectedBytes>0 || root.closeRows.length>0); opacity:enabled?1:0.45; onClicked:root.cleanSelected() }
           SoundUi.Button { soundBus:sounds; Layout.fillWidth:true; Layout.preferredWidth:1; text:root.busy && root.operation==="scan"?(root.cancelling?"Cancelling…":"Cancel Scan"):"Scan Again"; iconText:root.busy?"󰅖":"󰑐"; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy || (root.operation==="scan" && !root.cancelling); opacity:enabled?1:0.45; background:root.busy && root.operation==="scan"?"#59383c":"transparent"; onClicked:{if(root.busy)root.cancelScan();else root.start(["--scan"])} }
           SoundUi.Button { soundBus:sounds; iconText:"󰅀"; Layout.fillHeight:true; tooltipText:"More actions"; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy; opacity:enabled?1:0.45; onClicked:{root.toolGroup="main";root.toolsOpen=!root.toolsOpen} }
         }

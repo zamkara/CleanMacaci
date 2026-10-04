@@ -113,16 +113,23 @@ def categories():
 
 def close_apps(key):
  rows={r['id']:r for r in categories()}
- row=rows.get(key)
- if not row or not row.get('windows'):raise ValueError('No matching application windows remain. Scan again.')
+ requested=list(dict.fromkeys(key.split(',')))
+ windows={}
+ # Validate all queued requests before closing the first window.
+ for entry in requested:
+  row=rows.get(entry)
+  if not row or row.get('confidence')=='preserve' or not row.get('windows'):raise ValueError('No matching application windows remain. Scan again.')
+  for window in row['windows']:
+   address=window['address']
+   if not __import__('re').fullmatch(r'0x[0-9a-fA-F]+',address):raise ValueError('Invalid application window address.')
+   windows[address]=window
  closed=[]
- for window in row['windows']:
-  address=window['address']
-  if not __import__('re').fullmatch(r'0x[0-9a-fA-F]+',address):continue
+ for address,window in windows.items():
+  print('Requesting normal close: '+window.get('app','')+' '+address,file=sys.stderr,flush=True)
   result=run(['hyprctl','dispatch','hl.dsp.window.close({ window = '+json.dumps('address:'+address)+' })'])
   if result.returncode:raise ValueError(result.stderr or result.stdout)
   closed.append(window)
- return {'close_requested':closed,'note':'Normal close requested. Unsaved work may prompt; scan again after the app exits.'}
+ return {'close_requested':closed,'note':'Normal close requested. Unsaved work may prompt; scan again after the app exits. No files were deleted.'}
 
 def system_sources():
  sources=[]
