@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -31,6 +32,25 @@ Item {
   property var restoreSelectionIDs: []
   readonly property var closeRows: visibleRows.filter(function(r){return r.closeSelected && r.blocked && r.windows && r.windows.length>0})
   readonly property var visibleRows: categories.filter(function(r){return r.confidence!=="preserve"})
+  ListModel { id: rowModel }
+  onVisibleRowsChanged: syncRows()
+  function syncRows() {
+    var desired=visibleRows
+    for(var i=0;i<desired.length;i++) {
+      var row=desired[i], encoded=JSON.stringify(row)
+      if(i>=rowModel.count)rowModel.append({rowId:row.id,dataJson:encoded})
+      else {
+        if(rowModel.get(i).rowId!==row.id) {
+          var found=-1
+          for(var j=i+1;j<rowModel.count;j++)if(rowModel.get(j).rowId===row.id){found=j;break}
+          if(found>=0)rowModel.move(found,i,1)
+          else rowModel.insert(i,{rowId:row.id,dataJson:encoded})
+        }
+        if(rowModel.get(i).dataJson!==encoded)rowModel.setProperty(i,"dataJson",encoded)
+      }
+    }
+    if(rowModel.count>desired.length)rowModel.remove(desired.length,rowModel.count-desired.length)
+  }
   readonly property bool allSelected: visibleRows.some(function(r){return !r.blocked}) && visibleRows.filter(function(r){return !r.blocked}).every(function(r){return r.selected})
   function selectVisible() {
     if(busy) return
@@ -110,7 +130,7 @@ Item {
     target: "cleanmacaci"
     function status(): string { return JSON.stringify({busy: root.busy, categories: root.categories, selectedBytes: root.selectedBytes, confirming: root.confirming, error: root.errorText, result: root.resultText}) }
     function scan(): string { root.start(["--scan"]); return "ok" }
-    function state(): string { return JSON.stringify({busy:root.busy,operation:root.operation,visible:root.visibleRows.length,error:root.errorText}) }
+    function state(): string { return JSON.stringify({busy:root.busy,operation:root.operation,visible:root.visibleRows.length,error:root.errorText,scrollY:list.contentY,closeQueued:root.closeRows.length}) }
   }
   Process {
     id: worker
@@ -182,10 +202,11 @@ Item {
           GridView {
             id:list
             Layout.fillWidth:true; Layout.preferredHeight:Math.min(300,Math.max(60,Math.ceil(root.visibleRows.length/(list.width<600?1:2))*62))
-            clip:true; reuseItems:true; cacheBuffer:0; model:root.visibleRows
+            clip:true; reuseItems:true; cacheBuffer:0; model:rowModel
             cellWidth:width/(list.width<600?1:2); cellHeight:62
             delegate:Rectangle {
-              required property var modelData
+              required property string dataJson
+              readonly property var modelData: JSON.parse(dataJson)
               required property int index
               width:list.cellWidth-8; height:58; radius:6
               activeFocusOnTab:!root.busy && (!modelData.blocked || (!!modelData.windows && modelData.windows.length>0))
@@ -196,7 +217,7 @@ Item {
               Item {
                 anchors { fill:parent; leftMargin:12; rightMargin:12 }
                 Item { id:check; anchors.verticalCenter:parent.verticalCenter; width:24; height:32
-                  Text { anchors.centerIn:parent; text:modelData.blocked?(modelData.closeSelected?"󰌿":"󰌾"):modelData.selected?"󰄲":"󰄱"; color:Color.menu.text; opacity:modelData.blocked && !modelData.closeSelected?0.45:1; font.family:Style.font.family; font.pixelSize:24 }
+                  Text { anchors.centerIn:parent; text:modelData.blocked?(modelData.closeSelected?"󰿆":"󰌾"):modelData.selected?"󰄲":"󰄱"; color:Color.menu.text; opacity:modelData.blocked && !modelData.closeSelected?0.45:1; font.family:Style.font.family; font.pixelSize:24 }
                   MouseArea { anchors.fill:parent; enabled:!root.busy && (!modelData.blocked || (!!modelData.windows && modelData.windows.length>0)); cursorShape:Qt.PointingHandCursor; onClicked:{if(modelData.blocked)root.toggleLock(modelData);else root.toggleCategory(root.rowIndex(modelData))} }
                 }
                 Column {
