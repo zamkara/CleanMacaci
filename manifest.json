@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "cleaner.zamkara.ati",
+  "name": "CleanMacaci",
+  "version": "1.0.0",
+  "author": "zamkara",
+  "description": "System Cleaner for Omarchy with verified cache selection, preview validation and protected user data.",
+  "license": "LicenseRef-Almatera-Incubator",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "CleanMacaci.qml"
+  }
+}

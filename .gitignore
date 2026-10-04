@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.qmlcache/
+*.log
+*.qslog
+*.core
+*.tmp
+.DS_Store
