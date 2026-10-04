@@ -76,13 +76,13 @@ class Safety(unittest.TestCase):
   row=next(r for r in self.rows() if cookie in r['paths']);self.assertTrue(row['blocked'])
  def test_cache_with_private_database_never_auto_selected(self):
   self.put('.config/browser/Default/Preferences');self.put('.config/browser/Default/Cache/Cache_Data/data');self.put('.config/browser/Default/Cache/secret.db')
-  self.assertFalse(self.rows()[0]['selected'])
+  row=next(r for r in self.rows() if r['paths']==[self.home/'.config/browser/Default/Cache']);self.assertFalse(row['selected'])
  def test_offline_site_cache_needs_review(self):
   self.put('.config/chromium/Default/Preferences');self.put('.config/chromium/Default/Service Worker/CacheStorage/data')
-  row=self.rows()[0];self.assertFalse(row['selected']);self.assertEqual(row['kind'],'site-cache')
+  row=next(r for r in self.rows() if r['paths']==[self.home/'.config/chromium/Default/Service Worker']);self.assertFalse(row['selected']);self.assertEqual(row['kind'],'site-cache')
  def test_browser_diagnostics_are_actionable_not_auto(self):
   self.put('.config/browser/Default/Preferences');self.put('.config/browser/Default/Crashpad/report.dmp')
-  row=self.rows()[0];self.assertFalse(row['selected']);self.assertFalse(row['blocked']);self.assertEqual(row['kind'],'diagnostics')
+  row=next(r for r in self.rows() if r['paths']==[self.home/'.config/browser/Default/Crashpad']);self.assertFalse(row['selected']);self.assertFalse(row['blocked']);self.assertEqual(row['kind'],'diagnostics')
  def test_rotated_compressed_logs_are_review_only(self):
   self.put('.local/state/app/output.log.2.gz');row=self.rows()[0]
   self.assertEqual(row['kind'],'log');self.assertFalse(row['selected'])
