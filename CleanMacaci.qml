@@ -24,6 +24,13 @@ Item {
   property string operation: ""
   property bool cancelling: false
   property string logText: ""
+  property real progress: 0
+  property bool progressKnown: false
+  property string progressPhase: ""
+  property real progressSweep: 0
+  NumberAnimation on progressSweep { from:0; to:1; duration:1400; loops:Animation.Infinite; running:root.busy && !root.progressKnown }
+  Gradient { id:cleanupProgress; orientation:Gradient.Horizontal; GradientStop { position:0; color:"#925258" } GradientStop { position:root.progress; color:"#925258" } GradientStop { position:Math.min(1,root.progress+0.0001); color:"transparent" } GradientStop { position:1; color:"transparent" } }
+  Gradient { id:busyProgress; orientation:Gradient.Horizontal; GradientStop { position:0; color:"transparent" } GradientStop { position:Math.max(0,root.progressSweep-0.22); color:"transparent" } GradientStop { position:Math.min(root.progressSweep,Math.max(0,root.progressSweep-0.22)+0.0001); color:"#925258" } GradientStop { position:root.progressSweep; color:"#925258" } GradientStop { position:Math.min(1,root.progressSweep+0.0001); color:"transparent" } GradientStop { position:1; color:"transparent" } }
   property string coverageText: ""
   property int detailIndex: -1
   property int excludedCount: 0
@@ -60,7 +67,7 @@ Item {
     confirming=false
   }
   function rowIndex(row) { return categories.findIndex(function(r){return r.id===row.id}) }
-  function cancelScan() { if(busy && operation === "scan" && !cancelling){cancelling=true;worker.signal(15)} }
+  function cancelProcess() { if(busy && (operation === "scan" || operation === "clean") && !cancelling){cancelling=true;worker.signal(15)} }
   function copyReport() { if(root.busy || root.errorText){Quickshell.execDetached(["bash","-c",'printf "%s" "$1" | wl-copy',"copy-cleaner-log",root.errorText+"\n"+root.logText]);return} Quickshell.execDetached(["bash","-c",'wl-copy < "$1"',"copy-cleaner-report",root.statePath+"/latest-scan.json"]) }
   function displayRows(rows) {
     var available = rows.filter(function(r) { return r.bytes > 0 })
@@ -90,6 +97,7 @@ Item {
     confirming = false
     toolsOpen = false
     cancelling = false
+    progress=0; progressKnown=false;progressPhase=""
     operation = args[0] === "--close-apps" ? "close" : args[0] === "--clean" ? "clean" : "scan"
     logText = ""
     resultText = ""
@@ -134,17 +142,17 @@ Item {
   }
   Process {
     id: worker
-    stderr: SplitParser { onRead: function(line) { root.logText=(root.logText+line+"\n").slice(-16000) } }
+    stderr: SplitParser { onRead: function(line) { if(line.indexOf("@@progress ")===0){try{var p=JSON.parse(line.slice(11));root.progressPhase=p.phase || "";root.progressKnown=p.total>0;root.progress=p.total>0?Math.max(0,Math.min(1,p.current/p.total)):0}catch(e){root.logText+="Invalid progress event: "+line+"\n"}return}root.logText=(root.logText+line+"\n").slice(-16000) } }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         try {
-          if (root.cancelling || !text.trim()) return
+          if ((root.cancelling && root.operation==="scan") || !text.trim()) return
           var data = JSON.parse(text)
           if(data.close_requested){root.resultText=data.note;root.confirming=false;rescanTimer.restart();return}
           if (data.error) { root.errorText = data.error; sounds.play("error"); return }
           if (data.scan) {
-            root.resultText = "Cache removed: " + root.formatSize(data.removed_bytes) + ". " + data.errors.length + " error."
+            root.resultText = (data.cancelled?"Cleanup cancelled. Files already removed: ":"Cache removed: ") + root.formatSize(data.removed_bytes) + ". " + data.errors.length + " error."
             if (data.errors.length) root.errorText = data.errors.map(function(e) { return e.error }).join("; ")
             sounds.play(data.errors.length ? "warning" : "success")
             root.displayRows(data.scan.categories)
@@ -161,7 +169,7 @@ Item {
         } catch (e) { root.errorText = "Scan failed: " + e }
       }
     }
-    onExited: function(code, status) { if(root.cancelling) { root.resultText="Scan cancelled. No files were deleted."; root.cancelling=false; return } if (code !== 0 && !root.errorText) root.errorText = "Cleaner exited with code " + code }
+    onExited: function(code, status) { if(root.cancelling) { if(root.operation==="scan")root.resultText="Scan cancelled. No files were deleted."; root.cancelling=false; return } if (code !== 0 && !root.errorText) root.errorText = "Cleaner exited with code " + code }
   }
 
   Timer { id:rescanTimer; interval:1500; onTriggered:root.start(["--scan"]) }
@@ -246,13 +254,13 @@ Item {
           }
           SoundUi.Button { soundBus:sounds; iconText:"󰆏"; iconSize:22; tooltipText:root.busy?"Copy log":"Copy scan report"; enabled:!!root.logText || root.categories.length>0; opacity:enabled?1:0.45; onClicked:root.copyReport() }
         }
-        Text { visible:root.confirming; text:"Permanently remove "+root.formatSize(root.selectedBytes)+" of selected files?"; color:Color.menu.text; font.family:Style.font.menuFamily; font.pixelSize:Style.font.heading; Layout.fillWidth:true; wrapMode:Text.WordWrap }
+        Text { visible:root.confirming; text:root.closeRows.length?"Request normal application closure? Unsaved work may prompt.":"Permanently remove "+root.formatSize(root.selectedBytes)+" of selected files?"; color:Color.menu.text; font.family:Style.font.menuFamily; font.pixelSize:Style.font.heading; Layout.fillWidth:true; wrapMode:Text.WordWrap }
         Rectangle { Layout.fillWidth:true; implicitHeight:1; color:Color.menu.border }
         RowLayout {
           id:footerActions
           Layout.fillWidth:true; spacing:12
-          SoundUi.Button { soundBus:sounds; Layout.fillWidth:true; Layout.preferredWidth:1; text:root.closeRows.length?(root.confirming?"Confirm Close Apps":"Close Apps & Rescan"):(root.confirming?"Confirm Clean":"Clean Selected"); iconText:"󰃢"; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy && (root.selectedBytes>0 || root.closeRows.length>0); opacity:enabled?1:0.45; onClicked:root.cleanSelected() }
-          SoundUi.Button { soundBus:sounds; Layout.fillWidth:true; Layout.preferredWidth:1; text:root.busy && root.operation==="scan"?(root.cancelling?"Cancelling…":"Cancel Scan"):"Scan Again"; iconText:root.busy?"󰅖":"󰑐"; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy || (root.operation==="scan" && !root.cancelling); opacity:enabled?1:0.45; background:root.busy && root.operation==="scan"?"#59383c":"transparent"; onClicked:{if(root.busy)root.cancelScan();else root.start(["--scan"])} }
+          SoundUi.Button { soundBus:sounds; Layout.fillWidth:true; Layout.preferredWidth:1; text:root.busy && root.operation==="clean"?(root.cancelling?"Cancelling…":root.progressPhase==="refresh"?"Finishing…":"Cancel"+(root.progressKnown?" · "+Math.round(root.progress*100)+"%":"")):root.closeRows.length?(root.confirming?"Confirm Close Apps":"Close Apps & Rescan"):(root.confirming?"Confirm Clean":"Clean Selected"); iconText:root.busy && root.operation==="clean"?"󰅖":"󰃢"; gradient:root.busy && root.operation==="clean"?(root.progressKnown?cleanupProgress:busyProgress):null; foreground:Color.menu.text; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:root.busy?(root.operation==="clean" && root.progressPhase!=="refresh" && !root.cancelling):(root.selectedBytes>0 || root.closeRows.length>0); opacity:enabled?1:0.45; onClicked:{if(root.busy)root.cancelProcess();else root.cleanSelected()} }
+          SoundUi.Button { soundBus:sounds; Layout.fillWidth:true; Layout.preferredWidth:1; text:root.busy && root.operation==="scan"?(root.cancelling?"Cancelling…":"Cancel Scan"):"Scan Again"; iconText:root.busy?"󰅖":"󰑐"; fontFamily:Style.font.menuFamily; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy || (root.operation==="scan" && !root.cancelling); opacity:enabled?1:0.45; gradient:root.busy && root.operation==="scan"?busyProgress:null; foreground:Color.menu.text; onClicked:{if(root.busy)root.cancelProcess();else root.start(["--scan"])} }
           SoundUi.Button { soundBus:sounds; iconText:"󰅀"; Layout.fillHeight:true; tooltipText:"More actions"; fontSize:Style.font.heading+1; bordered:true; focusable:true; enabled:!root.busy; opacity:enabled?1:0.45; onClicked:{root.toolGroup="main";root.toolsOpen=!root.toolsOpen} }
         }
 

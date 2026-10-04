@@ -29,7 +29,7 @@ A custom System menu can read `~/.config/omarchy/extensions/system-menu.json`. T
 - Requires confirmation and a successful preview. The full selection is checked for changed files before deletion. Cache directories retain their identity and permissions; eligible contents are removed.
 - Provides real logs, scan reports, disk usage, scan cancellation, and separate system cleanup for package versions, archived journal logs and aged temporary files.
 
-Cleaning is permanent. Preview signatures are metadata checks, not transactional filesystem snapshots. Do not run builds or restart an application while its data is being cleaned. Deletion cancellation is intentionally unavailable; scans can be cancelled. Coverage is bounded and reports skipped or unreadable trees.
+Cleaning is permanent. Preview signatures are metadata checks, not transactional filesystem snapshots. Do not run builds or restart an application while its data is being cleaned. Cleanup can be cancelled between file operations. Files already deleted are not restored. Scan uses an indeterminate progress indicator; cleanup progress counts completed file and directory operations. Coverage is bounded and reports skipped or unreadable trees.
 
 ## Requirements
 

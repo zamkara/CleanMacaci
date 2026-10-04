@@ -146,4 +146,18 @@ class Safety(unittest.TestCase):
    with self.assertRaises(ValueError):m.close_apps('a,missing')
    self.assertEqual(calls,[])
   finally:m.categories,m.run=old
+ def test_cleanup_cancellation_stops_between_files(self):
+  import json
+  self.put('.config/browser/Default/Preferences');a=self.put('.config/browser/Default/Cache/Cache_Data/a');b=self.put('.config/browser/Default/Cache/Cache_Data/b');rows=self.rows()
+  old=(m.USER_HOME,m.STATE,m.categories,m.scan,m.emit_progress,m.cancel_requested)
+  try:
+   m.USER_HOME=self.home;m.STATE=self.home/'reports';m.STATE.mkdir();m.categories=lambda:rows;m.scan=lambda:{};m.cancel_requested=False
+   (m.STATE/'latest-scan.json').write_text(json.dumps({'categories':m.public(m.bind_preview(rows))}))
+   events=[]
+   def progress(done,total,phase='clean',**kwargs):
+    events.append((done,total,phase))
+    if phase=='clean' and done==1:m.cancel_requested=True
+   m.emit_progress=progress
+   result=m.clean([r['id'] for r in rows if not r['blocked']]);self.assertTrue(result['cancelled']);self.assertFalse(a.exists());self.assertTrue(b.exists());self.assertTrue(a.parent.exists());self.assertIn((1,3,'clean'),events)
+  finally:m.USER_HOME,m.STATE,m.categories,m.scan,m.emit_progress,m.cancel_requested=old
 if __name__=='__main__':unittest.main()

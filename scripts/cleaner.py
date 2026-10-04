@@ -203,6 +203,43 @@ def scan():
   except (OSError,ValueError,KeyError):pass
  (STATE/'latest-scan.json').write_text(json.dumps(info,indent=2)+'\n');return info
 
+cancel_requested=False
+_last_progress=0
+class CleanupCancelled(Exception):pass
+
+def request_cancel(signum,frame):
+ global cancel_requested
+ cancel_requested=True
+
+def emit_progress(done,total,phase='clean',force=False):
+ global _last_progress
+ now=time.monotonic()
+ if force or done==0 or done>=total or now-_last_progress>=0.1:
+  print('@@progress '+json.dumps({'current':done,'total':total,'phase':phase}),file=sys.stderr,flush=True);_last_progress=now
+
+def operation_count(path,preserve_root):
+ if not path.is_dir() or path.is_symlink():return 1
+ total=0 if preserve_root else 1
+ def fail(error):raise error
+ for _,dirs,files in os.walk(path,followlinks=False,onerror=fail):total+=len(dirs)+len(files)
+ return total
+
+def remove_target(path,preserve_root,completed):
+ def remove(item,directory=False):
+  if cancel_requested:raise CleanupCancelled()
+  allocated=0 if directory else item.lstat().st_blocks*512
+  if directory:item.rmdir()
+  else:item.unlink()
+  completed(allocated)
+ if not path.is_dir() or path.is_symlink():remove(path);return
+ def fail(error):raise error
+ for parent,dirs,files in os.walk(path,topdown=False,followlinks=False,onerror=fail):
+  parent=pathlib.Path(parent)
+  for name in sorted(files):remove(parent/name)
+  for name in sorted(dirs):
+   item=parent/name;remove(item,not item.is_symlink())
+ if not preserve_root:remove(path,True)
+
 def clean(ids):
  rows=apply_keep_rules(categories());eligible={r['id']:r for r in rows};unknown=set(ids)-eligible.keys()
  if unknown:raise ValueError('Scan changed; rescan before cleaning: '+','.join(unknown))
@@ -223,34 +260,42 @@ def clean(ids):
     stats=os.statvfs(path);device=getattr(stats,'f_fsid',path.stat().st_dev)
     free_before.setdefault(device,(path.parent,stats.f_bavail*stats.f_frsize))
    except OSError:pass
- reclaimed=0;actions=[];errors=[]
+ reclaimed=0;actions=[];errors=[];cancelled=False;completed_count=0
+ preserve_kinds={'cache','generated','site-cache','log','diagnostics'}
+ total=sum(operation_count(p,row.get('kind') in preserve_kinds) for key in ids for row in [eligible[key]] if not row['blocked'] for p in row['paths'])
+ emit_progress(0,total)
+ def completed(allocated):
+  nonlocal reclaimed,completed_count
+  reclaimed+=allocated;completed_count+=1;emit_progress(completed_count,total)
  for key in ids:
+  if cancel_requested:cancelled=True;break
   row=eligible[key]
   if row['blocked']:actions.append({'id':key,'status':'skipped','reason':row['reason']});continue
   for path in row['paths']:
    if not valid(path):errors.append({'path':str(path),'error':'Path redirected or outside approved discovery roots'});continue
-   amount=size(path)
+   before=reclaimed
    print('Removing '+str(path),file=sys.stderr,flush=True)
    try:
-    if path.is_dir() and row.get('kind') in ('cache','generated','site-cache','log','diagnostics'):
-     # Preserve the application's cache directory permissions and identity.
-     for child in path.iterdir():
-      if child.is_dir() and not child.is_symlink():shutil.rmtree(child)
-      else:child.unlink()
-    elif path.is_dir():shutil.rmtree(path)
-    else:path.unlink()
-    reclaimed+=amount;actions.append({'id':key,'path':str(path),'bytes':amount,'status':'cleaned'})
+    remove_target(path,row.get('kind') in preserve_kinds,completed)
+    actions.append({'id':key,'path':str(path),'bytes':reclaimed-before,'status':'cleaned'})
+   except CleanupCancelled:
+    cancelled=True;actions.append({'id':key,'path':str(path),'bytes':reclaimed-before,'status':'cancelled'});break
    except (OSError,shutil.Error) as e:errors.append({'path':str(path),'error':str(e)})
+  if cancelled:break
+ emit_progress(completed_count,total,force=True)
  measured=0
  for parent,before in free_before.values():
   try:
    stats=os.statvfs(parent);measured+=max(0,stats.f_bavail*stats.f_frsize-before)
   except OSError:pass
- result={'timestamp':datetime.datetime.now().isoformat(timespec='seconds'),'removed_bytes':reclaimed,'reclaimed_bytes':measured,'actions':actions,'errors':errors}
- STATE.mkdir(parents=True,exist_ok=True);(STATE/('cleanup-'+str(time.time_ns())+'.json')).write_text(json.dumps(result,indent=2)+'\n');result['scan']=scan();return result
+ result={'timestamp':datetime.datetime.now().isoformat(timespec='seconds'),'removed_bytes':reclaimed,'reclaimed_bytes':measured,'actions':actions,'errors':errors,'cancelled':cancelled}
+ STATE.mkdir(parents=True,exist_ok=True);(STATE/('cleanup-'+str(time.time_ns())+'.json')).write_text(json.dumps(result,indent=2)+'\n');emit_progress(0,0,'refresh',force=True);result['scan']=scan();return result
 
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('--scan',action='store_true');parser.add_argument('--inventory',action='store_true');parser.add_argument('--clean');parser.add_argument('--clean-safe',action='store_true');parser.add_argument('--close-apps');args=parser.parse_args()
+ if args.clean is not None or args.clean_safe:
+  import signal
+  signal.signal(signal.SIGTERM,request_cancel);signal.signal(signal.SIGINT,request_cancel)
  STATE.mkdir(parents=True,exist_ok=True)
  with (STATE/'lock').open('a') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
