@@ -1,6 +1,8 @@
 # CleanMacaci
 
-System Cleaner for Omarchy. The plugin page is **CleanMacaci**; its menu label is **System Cleaner**. Plugin ID: `cleaner.zamkara.ati`.
+System Cleaner for Omarchy. The plugin page is **CleanMacaci**; its menu label is **System Cleaner**.
+
+<img width="1920" height="1080" alt="screenshot-2026-10-04_17-42-05" src="https://github.com/user-attachments/assets/fa130907-8210-454a-a237-5441b66c02d7" />
 
 ## Install
 
